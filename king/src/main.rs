@@ -7,6 +7,10 @@ use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use std::sync::Mutex;
 
+// TODO:
+// all functions take users as parameter
+// all warn! will trough errors
+
 const DATABASE_FILE: &str = "db.txt";
 
 lazy_static! {
@@ -24,11 +28,12 @@ fn read_database_from_file<P: AsRef<Path>>(
     let map = serde_json::from_reader(reader)?;
     Ok(map)
 }
-
+// TODO: Logging in this function, return name of user inside Result, bruteforce protection
 fn welcome() {
     println!("Welcome to KING: KING Is Not GAPS");
 }
 
+// TODO: username as parameter casbin will check access to function
 fn menu(teacher: &mut bool) {
     if *teacher {
         teacher_action();
@@ -37,11 +42,16 @@ fn menu(teacher: &mut bool) {
     }
 }
 
+// TODO: admin_actions
+// add remove teacher/student
+// become_teacher options
+
 fn student_action(teacher: &mut bool) {
     println!("*****\n1: See your grades\n2: Teachers' menu\n3: About\n0: Quit");
     let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
     match choice {
         1 => show_grades("Enter your name. Do NOT lie!"),
+        // TODO: remove this option
         2 => become_teacher(teacher),
         3 => about(),
         0 => quit(),
@@ -61,6 +71,7 @@ fn teacher_action() {
     }
 }
 
+// TODO: take message and username as parameter check with cabin if access to grades authorized + logs
 fn show_grades(message: &str) {
     println!("{}", message);
     let name: String = input().get();
@@ -78,6 +89,7 @@ fn show_grades(message: &str) {
     };
 }
 
+// TODO: function called by admin_action => change access rights of username with casbin
 fn become_teacher(teacher: &mut bool) {
     println!("Are you a prof? (yes/no) Do NOT lie!");
     let rep: String = input().get();
@@ -89,6 +101,7 @@ fn become_teacher(teacher: &mut bool) {
     }
 }
 
+// TODO: if students not exist error
 fn enter_grade() {
     println!("What is the name of the student?");
     let name: String = input().get();
