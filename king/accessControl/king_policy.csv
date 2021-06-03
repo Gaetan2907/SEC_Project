@@ -1,0 +1,8 @@
+p, admin, admin_action
+p, teacher, teacher_action
+p, student, student_action
+
+g,teacher,admin
+g,gaetan,student
+g,quentin,student
+g,teeeeeacher,admin

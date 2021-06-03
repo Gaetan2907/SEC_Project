@@ -1,19 +1,26 @@
+mod access_control;
+
 extern crate argon2;
+extern crate csv;
 extern crate passablewords;
+use crate::access_control::{is_allowed, CONFIG, POLICY};
+use crate::Actions::StudentAction;
+use argon2::{Config, ThreadMode, Variant, Version};
+use futures::executor::block_on;
 use lazy_static::{__Deref, lazy_static};
+use passablewords::{check_password, PasswordError};
+use rand::rngs::OsRng;
+use rand::RngCore;
 use read_input::prelude::*;
+use regex::Regex;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use std::sync::Mutex;
-use argon2::{ Config, ThreadMode, Variant, Version};
-use regex::Regex;
-use rand::rngs::{ OsRng};
-use rand::RngCore;
-use passablewords::{check_password,PasswordError};
-use std::convert::TryFrom;
+
 // TODO:
 // all functions take users as parameter
 // all warn! will trough errors : quentin
@@ -22,8 +29,16 @@ use std::convert::TryFrom;
 
 const DATABASE_FILE: &str = "db.txt";
 
+const ADMIN: &str = "admin";
+const TEACHER: &str = "teacher";
+const STUDENT: &str = "student";
+
+const ADMIN_ACTION: &str = "admin_action";
+const TEACHER_ACTION: &str = "teacher_action";
+const STUDENT_ACTION: &str = "student_action";
+
 lazy_static! {
-    static ref DATABASE: Mutex<HashMap<String,(Vec<u8>,Vec<u8>)>> = {
+    static ref DATABASE: Mutex<HashMap<String, (Vec<u8>, Vec<u8>)>> = {
         let map = read_database_from_file(DATABASE_FILE).unwrap_or(HashMap::new());
 
         Mutex::new(map)
@@ -33,28 +48,38 @@ lazy_static! {
 pub enum KingError {
     AccessDenied,
     LoginFailed,
+    AlreadyRegistered,
+}
+
+enum Actions {
+    AdminAction,
+    TeacherAction,
+    StudentAction,
 }
 
 fn read_database_from_file<P: AsRef<Path>>(
     path: P,
-) -> Result<HashMap<String, (Vec<u8>,Vec<u8>)>, Box<dyn Error>> {
+) -> Result<HashMap<String, (Vec<u8>, Vec<u8>)>, Box<dyn Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let map = serde_json::from_reader(reader)?;
     Ok(map)
 }
-fn check_username(username: &str)->bool{
+fn check_username(username: &str) -> bool {
     let re = Regex::new(r"^[\da-z]{1,20}$").unwrap();
-     re.is_match(username)
-
+    re.is_match(username)
 }
-fn check_pass(password:&String)->bool{
+fn check_pass(password: &String) -> bool {
     let good;
     match check_password(password.as_str()) {
-        Ok(..) => {good=true;}
+        Ok(..) => {
+            good = true;
+        }
         Err(err) => {
             match err {
-                PasswordError::TooShort => println!("Your password should be longer than 8 characters"),
+                PasswordError::TooShort => {
+                    println!("Your password should be longer than 8 characters")
+                }
                 PasswordError::TooCommon => println!("Your should be more unique"),
                 PasswordError::TooSimple => println!("Your should be more random"),
                 PasswordError::InternalError => println!("Internal error"),
@@ -66,54 +91,100 @@ fn check_pass(password:&String)->bool{
     good
 }
 //tmp function
-fn register(username:&str,salt:&Vec<u8>,password:&Vec<u8>){
-
+fn register(username: &str, salt: &Vec<u8>, password: &Vec<u8>) {
     let password = password.clone();
     let salt = salt.clone();
     let mut map = DATABASE.lock().unwrap();
     map.insert(String::from(username), (salt, password));
 }
 
-fn is_correct_password(to_check:&Vec<u8>,password:&Vec<u8>)->bool{
-    let mut is_same =true;
-    for i in 0..password.len(){
-        if to_check[i]!=password[i]{
-            is_same =false;
+fn register_user(role: &str) {
+    let username: String = input()
+        .msg("Please input username: ")
+        .add_test(|x: &String| check_username(x.as_str()))
+        .get();
+    let password: String = input().msg("Please input password: ").get();
+
+    if !already_registered(username.as_str()) {
+        // write role access rights into csv policy file
+        let mut policy_file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(POLICY)
+            .unwrap();
+        let mut wtr = csv::Writer::from_writer(policy_file);
+        wtr.write_record(&["g", username.as_str(), role]);
+
+        // save credentials in hashmap
+        let mut salt = [0u8; 16];
+        OsRng.fill_bytes(&mut salt);
+        let hashed_password = hash_password(password.as_str(), salt, 1);
+        let mut map = DATABASE.lock().unwrap();
+        map.insert(
+            String::from(username.as_str()),
+            (Vec::from(salt), hashed_password),
+        );
+        println!("register success");
+    } else {
+        println!("User already registered.");
+    }
+}
+
+fn already_registered(user: &str) -> bool {
+    let mut map = DATABASE.lock().unwrap();
+    let data = map.get_mut(&String::from(user));
+    return match data {
+        Some(_) => true,
+        None => false,
+    };
+}
+
+fn is_correct_password(to_check: &Vec<u8>, password: &Vec<u8>) -> bool {
+    let mut is_same = true;
+    for i in 0..password.len() {
+        if to_check[i] != password[i] {
+            is_same = false;
         }
     }
     is_same
 }
-// TODO: Logging in this function, return name of user inside Result, bruteforce protection : quentin
-fn welcome()->Result<String,KingError> {
-    let mut incremental_timer=1;
-    while true {
-    let username: String = input().msg("Please input username: or break ").add_test(|x:&String|check_username(x.as_str())).get();
-    if username.as_str() =="break" {
-        return Err(KingError::LoginFailed);
-    }
 
-        let password:String = input().msg("Please input password: ").get();
+// TODO: Logging in this function, return name of user inside Result, bruteforce protection : quentin
+fn welcome() -> Result<String, KingError> {
+    let mut incremental_timer = 1;
+    while true {
+        let username: String = input()
+            .msg("Please input username: or break ")
+            .add_test(|x: &String| check_username(x.as_str()))
+            .get();
+        if username.as_str() == "break" {
+            return Err(KingError::LoginFailed);
+        }
+
+        let password: String = input().msg("Please input password: ").get();
         let mut map = DATABASE.lock().unwrap();
-        let data =map.get_mut(&username);
+        let data = map.get_mut(&username);
         match data {
-            Some(v)=>{
+            Some(v) => {
                 let salt = v.0.clone();
-                let hashed_password=hash_password(password.as_str(), <[u8; 16]>::try_from(salt).unwrap(), incremental_timer);
-                if is_correct_password(&hashed_password,&v.1){
+                let hashed_password = hash_password(
+                    password.as_str(),
+                    <[u8; 16]>::try_from(salt).unwrap(),
+                    incremental_timer,
+                );
+                if is_correct_password(&hashed_password, &v.1) {
                     println!("login succes");
                     return Ok(username);
-                }else{
-                    incremental_timer*=2;
+                } else {
+                    incremental_timer *= 2;
                 }
-
-            },
+            }
             None => {
-
                 drop(map);
 
                 let mut salt = [0u8; 16];
                 OsRng.fill_bytes(&mut salt);
-                let hashed_password=hash_password(password.as_str(), salt, incremental_timer);
+                let hashed_password = hash_password(password.as_str(), salt, incremental_timer);
                 register(username.as_str(), &Vec::from(salt), &hashed_password);
                 println!("register success");
                 return Ok(username);
@@ -123,33 +194,51 @@ fn welcome()->Result<String,KingError> {
     Err(KingError::LoginFailed)
 }
 
-// TODO: username as parameter casbin will check access to function : gaetan
 fn menu(user: &str) {
-    let is_teacher = is_allowed(user,"teacher_action").is_ok();
-    if  is_teacher{
-        teacher_action(user);
-    } else {
-        student_action(user);
+    println!("*****\n1: Student menu\n2: Teacher menu\n3: Admin menu\n4 About\n0: Quit");
+    let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
+    match choice {
+        1 => student_action(user),
+        2 => teacher_action(user),
+        3 => admin_action(user),
+        4 => about(),
+        0 => quit(),
+        _ => panic!("impossible choice"),
     }
 }
 
 // TODO: admin_actions : gaetan
-// add remove teacher/student
 // become_teacher options
-
-fn student_action(teacher: &str) {
-    println!("*****\n1: See your grades\n2: Teachers' menu\n3: About\n0: Quit");
-    let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
+fn admin_action(user: &str) {
+    println!("*****\n1: Add teacher\n2: Add student\n3: About\n0: Quit");
+    let choice = input().inside(0..=4).msg("Enter Your choice: ").get();
     match choice {
-        1 => show_grades("Enter your name. Do NOT lie!"),
-        // TODO: remove this option : quentin
+        1 => register_user(ADMIN),
+        2 => register_user(STUDENT),
         3 => about(),
         0 => quit(),
         _ => panic!("impossible choice"),
     }
 }
 
-fn teacher_action(teacher: &str) {
+fn student_action(user: &str) {
+    if block_on(access_control::is_allowed(user, STUDENT_ACTION)) {
+        // TODO: log info!
+        println!("*****\n1: See your grades\n2: Teachers' menu\n3: About\n0: Quit");
+        let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
+        match choice {
+            1 => show_grades("Enter your name. Do NOT lie!"),
+            // TODO: remove this option : quentin
+            3 => about(),
+            0 => quit(),
+            _ => panic!("impossible choice"),
+        }
+    } else {
+        // TODO: log warn!
+    }
+}
+
+fn teacher_action(user: &str) {
     println!("*****\n1: See grades of student\n2: Enter grades\n3 About\n0: Quit");
     let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
     match choice {
@@ -159,11 +248,6 @@ fn teacher_action(teacher: &str) {
         0 => quit(),
         _ => panic!("impossible choice"),
     }
-}
-
-// TODO: check with casbin if username authorized: gaetan
-fn is_allowed(username: &str, object: &str) -> Result<(), KingError> {
-    Ok(())
 }
 
 // TODO: take message and username as parameter check with cabin if access to grades authorized + logs : quentin
@@ -187,16 +271,16 @@ fn show_grades(message: &str) {
 }
 
 // TODO: function called by admin_action => change access rights of username with casbin : gaetan
-fn become_teacher(teacher: &mut bool) {
-    println!("Are you a prof? (yes/no) Do NOT lie!");
-    let rep: String = input().get();
-    if rep == "yes" {
-        println!("Access allowed");
-        *teacher = true;
-    } else {
-        println!("Access denied");
-    }
-}
+// fn become_teacher() {
+//     println!("Are you a prof? (yes/no) Do NOT lie!");
+//     let rep: String = input().get();
+//     if rep == "yes" {
+//         println!("Access allowed");
+//         *teacher = true;
+//     } else {
+//         println!("Access denied");
+//     }
+// }
 
 // TODO: if students not exist error : quentin
 fn enter_grade() {
@@ -225,7 +309,7 @@ fn quit() {
     serde_json::to_writer(writer, DATABASE.lock().unwrap().deref()).unwrap();
     std::process::exit(0);
 }
-fn hash_password( password : &str,salt:[u8;16],time:u32)->Vec<u8>{
+fn hash_password(password: &str, salt: [u8; 16], time: u32) -> Vec<u8> {
     let config = Config {
         variant: Variant::Argon2i,
         version: Version::Version13,
@@ -235,15 +319,16 @@ fn hash_password( password : &str,salt:[u8;16],time:u32)->Vec<u8>{
         thread_mode: ThreadMode::Parallel,
         secret: &[],
         ad: &[],
-        hash_length: 32
+        hash_length: 32,
     };
     let hash = argon2::hash_raw(password.as_bytes(), &salt[0..], &config).unwrap();
 
     hash[0..32].to_vec()
 }
+
 fn main() {
-    let user =welcome();
-    if user.is_ok(){
+    let user = welcome();
+    if user.is_ok() {
         let user = user.ok().unwrap();
         loop {
             menu(user.as_str());
