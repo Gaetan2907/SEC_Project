@@ -8,11 +8,13 @@ use crate::Actions::StudentAction;
 use argon2::{Config, ThreadMode, Variant, Version};
 use futures::executor::block_on;
 use lazy_static::{__Deref, lazy_static};
+use log::{error, info, trace, warn};
 use passablewords::{check_password, PasswordError};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use read_input::prelude::*;
 use regex::Regex;
+use simplelog::{ColorChoice, Config as SimpleLogConfig, LevelFilter, TermLogger, TerminalMode};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -125,8 +127,10 @@ fn register_user(role: &str) {
             (Vec::from(salt), hashed_password),
         );
         println!("register success");
+        info!("User {} successfully registered", username);
     } else {
         println!("User already registered.");
+        warn!("User {} already registered", username);
     }
 }
 
@@ -158,6 +162,7 @@ fn welcome() -> Result<String, KingError> {
             .add_test(|x: &String| check_username(x.as_str()))
             .get();
         if username.as_str() == "break" {
+            info!("Log-in break");
             return Err(KingError::LoginFailed);
         }
 
@@ -173,9 +178,11 @@ fn welcome() -> Result<String, KingError> {
                     incremental_timer,
                 );
                 if is_correct_password(&hashed_password, &v.1) {
-                    println!("login succes");
+                    info!("User {} logs-in", username);
+                    println!("login success");
                     return Ok(username);
                 } else {
+                    warn!("Failed log-in attempt for {}", username);
                     incremental_timer *= 2;
                 }
             }
@@ -186,6 +193,7 @@ fn welcome() -> Result<String, KingError> {
                 OsRng.fill_bytes(&mut salt);
                 let hashed_password = hash_password(password.as_str(), salt, incremental_timer);
                 register(username.as_str(), &Vec::from(salt), &hashed_password);
+                info!("User {} successfully registered", username);
                 println!("register success");
                 return Ok(username);
             }
@@ -196,57 +204,84 @@ fn welcome() -> Result<String, KingError> {
 
 fn menu(user: &str) {
     println!("*****\n1: Student menu\n2: Teacher menu\n3: Admin menu\n4 About\n0: Quit");
-    let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
+    let choice = input().inside(0..=4).msg("Enter Your choice: ").get();
     match choice {
         1 => student_action(user),
         2 => teacher_action(user),
         3 => admin_action(user),
         4 => about(),
         0 => quit(),
-        _ => panic!("impossible choice"),
+        _ => {
+            error!("User {} made an impossible action choice", user);
+            panic!("User {} made an impossible action choice", user);
+        }
     }
 }
 
-// TODO: admin_actions : gaetan
-// become_teacher options
 fn admin_action(user: &str) {
-    println!("*****\n1: Add teacher\n2: Add student\n3: About\n0: Quit");
-    let choice = input().inside(0..=4).msg("Enter Your choice: ").get();
-    match choice {
-        1 => register_user(ADMIN),
-        2 => register_user(STUDENT),
-        3 => about(),
-        0 => quit(),
-        _ => panic!("impossible choice"),
+    if block_on(access_control::is_allowed(user, ADMIN_ACTION)) {
+        info!("User {} accessed ADMIN_ACTION", user);
+        println!("*****\n1: Add teacher\n2: Add student\n3: About\n0: Quit");
+        let choice = input().inside(0..=4).msg("Enter Your choice: ").get();
+        match choice {
+            1 => register_user(ADMIN),
+            2 => register_user(STUDENT),
+            3 => about(),
+            0 => quit(),
+            _ => {
+                error!("User {} made an impossible action choice", user);
+                panic!("User {} made an impossible action choice", user);
+            }
+        }
+    } else {
+        warn!(
+            "User {} failed to access ADMIN_ACTION, not authorized",
+            user
+        );
     }
 }
 
 fn student_action(user: &str) {
     if block_on(access_control::is_allowed(user, STUDENT_ACTION)) {
-        // TODO: log info!
-        println!("*****\n1: See your grades\n2: Teachers' menu\n3: About\n0: Quit");
-        let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
+        info!("User {} accessed STUDENT_ACTION", user);
+        println!("*****\n1: See your grades\n2: About\n0: Quit");
+        let choice = input().inside(0..=2).msg("Enter Your choice: ").get();
         match choice {
             1 => show_grades("Enter your name. Do NOT lie!"),
-            // TODO: remove this option : quentin
-            3 => about(),
+            2 => about(),
             0 => quit(),
-            _ => panic!("impossible choice"),
+            _ => {
+                error!("User {} made an impossible action choice", user);
+                panic!("User {} made an impossible action choice", user);
+            }
         }
     } else {
-        // TODO: log warn!
+        warn!(
+            "User {} failed to access STUDENT_ACTION, not authorized",
+            user
+        );
     }
 }
 
 fn teacher_action(user: &str) {
-    println!("*****\n1: See grades of student\n2: Enter grades\n3 About\n0: Quit");
-    let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
-    match choice {
-        1 => show_grades("Enter the name of the user of which you want to see the grades:"),
-        2 => enter_grade(),
-        3 => about(),
-        0 => quit(),
-        _ => panic!("impossible choice"),
+    if block_on(access_control::is_allowed(user, TEACHER_ACTION)) {
+        println!("*****\n1: See grades of student\n2: Enter grades\n3 About\n0: Quit");
+        let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
+        match choice {
+            1 => show_grades("Enter the name of the user of which you want to see the grades:"),
+            2 => enter_grade(),
+            3 => about(),
+            0 => quit(),
+            _ => {
+                error!("User {} made an impossible action choice", user);
+                panic!("User {} made an impossible action choice", user);
+            }
+        }
+    } else {
+        warn!(
+            "User {} failed to access TEACHER_ACTION, not authorized",
+            user
+        );
     }
 }
 
@@ -299,11 +334,12 @@ fn enter_grade() {
 }
 
 fn about() {
+    error!("The requested URL was not found on this server.");
     panic!("The requested URL was not found on this server.");
 }
 
 fn quit() {
-    println!("Saving database!");
+    info!("Saving database!");
     let file = File::create(DATABASE_FILE).unwrap();
     let writer = BufWriter::new(file);
     serde_json::to_writer(writer, DATABASE.lock().unwrap().deref()).unwrap();
@@ -327,6 +363,13 @@ fn hash_password(password: &str, salt: [u8; 16], time: u32) -> Vec<u8> {
 }
 
 fn main() {
+    TermLogger::init(
+        LevelFilter::Trace,
+        SimpleLogConfig::default(),
+        TerminalMode::Stderr,
+        ColorChoice::Auto,
+    )
+    .unwrap();
     let user = welcome();
     if user.is_ok() {
         let user = user.ok().unwrap();
