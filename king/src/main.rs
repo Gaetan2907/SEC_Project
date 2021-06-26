@@ -200,14 +200,8 @@ fn welcome() -> Result<String, KingError> {
             }
             None => {
                 drop(map);
-
-                let mut salt = [0u8; 16];
-                OsRng.fill_bytes(&mut salt);
-                let hashed_password = hash_password(password.as_str(), salt, incremental_timer);
-                register(username.as_str(), &Vec::from(salt), &hashed_password);
-                info!("User {} successfully registered", username);
-                println!("register success");
-                return Ok(username);
+                warn!("Failed log-in attempt for {}", username);
+                incremental_timer *= 2;
             }
         };
     }
@@ -259,7 +253,7 @@ fn student_action(user: &str) {
         println!("*****\n1: See your grades\n2: About\n0: Quit");
         let choice = input().inside(0..=2).msg("Enter Your choice: ").get();
         match choice {
-            1 => show_grades("Enter your name. Do NOT lie!",user),
+            1 => show_grades("Enter your name. Do NOT lie!", user),
             2 => about(),
             0 => quit(),
             _ => {
@@ -280,7 +274,10 @@ fn teacher_action(user: &str) {
         println!("*****\n1: See grades of student\n2: Enter grades\n3 About\n0: Quit");
         let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
         match choice {
-            1 => show_grades("Enter the name of the user of which you want to see the grades:",user),
+            1 => show_grades(
+                "Enter the name of the user of which you want to see the grades:",
+                user,
+            ),
             2 => enter_grade(user),
             3 => about(),
             0 => quit(),
@@ -298,17 +295,16 @@ fn teacher_action(user: &str) {
 }
 
 //#todo is teacher ? gaetan : quentin
-fn show_grades(message: &str,user:&str) {
+fn show_grades(message: &str, user: &str) {
     println!("{}", message);
     let name: String = input().get();
-    if user==name.as_str(){
+    if user == name.as_str() {
         println!("Here are the grades of user {}", name);
-        info!("User {} read grade of {}",
-              user,name
-        );
-    }else {
-        warn!(" User {} tried to read grade of {}, not authorized",
-              user,name
+        info!("User {} read grade of {}", user, name);
+    } else {
+        warn!(
+            " User {} tried to read grade of {}, not authorized",
+            user, name
         );
     }
     //other file
@@ -338,7 +334,7 @@ fn show_grades(message: &str,user:&str) {
 //     }
 // }
 
-fn enter_grade(user:&str) {
+fn enter_grade(user: &str) {
     println!("What is the name of the student?");
     let name: String = input().get();
 
@@ -347,7 +343,7 @@ fn enter_grade(user:&str) {
     // change file with validation
     let mut map = DATABASE.lock().unwrap();
     match map.get_mut(&name) {
-        Some(_) =>{
+        Some(_) => {
             let mut map_grade = DATABASE_GRADE.lock().unwrap();
             match map_grade.get_mut(&name) {
                 Some(v) => v.push(grade),
@@ -355,11 +351,21 @@ fn enter_grade(user:&str) {
                     map_grade.insert(name.clone(), vec![grade]);
                 }
             }
-            info!("{} add grade : {} to student {}",user,grade,name.as_str());
-        },
+            info!(
+                "{} add grade : {} to student {}",
+                user,
+                grade,
+                name.as_str()
+            );
+        }
         None => {
-            warn!("user {} tried to add grade {} to unknown student {}",user,grade,name.as_str());
-            println!("user {} does not exist",name);
+            warn!(
+                "user {} tried to add grade {} to unknown student {}",
+                user,
+                grade,
+                name.as_str()
+            );
+            println!("user {} does not exist", name);
         }
     };
 }
