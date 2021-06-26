@@ -338,7 +338,6 @@ fn show_grades(message: &str,user:&str) {
 //     }
 // }
 
-// TODO: if students not exist error : quentin
 fn enter_grade(user:&str) {
     println!("What is the name of the student?");
     let name: String = input().get();
@@ -360,6 +359,7 @@ fn enter_grade(user:&str) {
         },
         None => {
             warn!("user {} tried to add grade {} to unknown student {}",user,grade,name.as_str());
+            println!("user {} does not exist",name);
         }
     };
 }
