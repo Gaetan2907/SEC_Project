@@ -16,7 +16,6 @@ pub async fn auth(subject: &str, ressource: &str) -> bool {
     }
 }
 
-// TODO: check with casbin if username authorized: gaetan
 pub async fn is_allowed(subject: &str, resource: &str) -> bool {
     let e = Enforcer::new(CONFIG, POLICY)
         .await

@@ -195,13 +195,13 @@ fn welcome() -> Result<String, KingError> {
                     return Ok(username);
                 } else {
                     warn!("Failed log-in attempt for {}", username);
-                    incremental_timer *= 2;
+                    // incremental_timer *= 2;
                 }
             }
             None => {
                 drop(map);
                 warn!("Failed log-in attempt for {}", username);
-                incremental_timer *= 2;
+                // incremental_timer *= 2;
             }
         };
     }
@@ -298,41 +298,36 @@ fn teacher_action(user: &str) {
 fn show_grades(message: &str, user: &str) {
     println!("{}", message);
     let name: String = input().get();
-    if user == name.as_str() {
-        println!("Here are the grades of user {}", name);
+    let mut authorized = false;
+    // teacher can read all grades
+    if block_on(access_control::is_allowed(user, TEACHER_ACTION)) {
+        info!("Teacher {} read grade of {}", user, name);
+        authorized = true;
+    } else if user == name.as_str() {
         info!("User {} read grade of {}", user, name);
+        authorized = true
     } else {
         warn!(
             " User {} tried to read grade of {}, not authorized",
             user, name
         );
     }
-    //other file
-    let db = DATABASE_GRADE.lock().unwrap();
+    if authorized {
+        //other file
+        let db = DATABASE_GRADE.lock().unwrap();
 
-    match db.get(&name) {
-        Some(grades) => {
-            println!("{:?}", grades);
-            println!(
-                "The average is {}",
-                (grades.iter().sum::<f32>()) / ((*grades).len() as f32)
-            );
-        }
-        None => println!("User not in system"),
-    };
+        match db.get(&name) {
+            Some(grades) => {
+                println!("{:?}", grades);
+                println!(
+                    "The average is {}",
+                    (grades.iter().sum::<f32>()) / ((*grades).len() as f32)
+                );
+            }
+            None => println!("User not in system"),
+        };
+    }
 }
-
-// TODO: function called by admin_action => change access rights of username with casbin : gaetan
-// fn become_teacher() {
-//     println!("Are you a prof? (yes/no) Do NOT lie!");
-//     let rep: String = input().get();
-//     if rep == "yes" {
-//         println!("Access allowed");
-//         *teacher = true;
-//     } else {
-//         println!("Access denied");
-//     }
-// }
 
 fn enter_grade(user: &str) {
     println!("What is the name of the student?");
