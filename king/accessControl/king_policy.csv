@@ -3,3 +3,6 @@ p, teacher, teacher_action
 p, student, student_action
 
 g,admin,admin
+g,teacher,admin
+g,student,student
+g,student2,student
