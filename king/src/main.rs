@@ -30,7 +30,7 @@ use std::sync::Mutex;
 // input validation username only alphanum max 20 chars : quentin
 
 const DATABASE_FILE: &str = "db.txt";
-
+const GRADE_FILE: &str = "grade.txt";
 const ADMIN: &str = "admin";
 const TEACHER: &str = "teacher";
 const STUDENT: &str = "student";
@@ -44,6 +44,11 @@ lazy_static! {
         let map = read_database_from_file(DATABASE_FILE).unwrap_or(HashMap::new());
 
         Mutex::new(map)
+    };
+    static ref DATABASE_GRADE: Mutex<HashMap<String, Vec<f32>>> = {
+        let map_grade = read_grade_from_file(GRADE_FILE).unwrap_or(HashMap::new());
+
+        Mutex::new(map_grade)
     };
 }
 
@@ -62,6 +67,14 @@ enum Actions {
 fn read_database_from_file<P: AsRef<Path>>(
     path: P,
 ) -> Result<HashMap<String, (Vec<u8>, Vec<u8>)>, Box<dyn Error>> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let map = serde_json::from_reader(reader)?;
+    Ok(map)
+}
+fn read_grade_from_file<P: AsRef<Path>>(
+    path: P,
+) -> Result<HashMap<String, Vec<f32>>, Box<dyn Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let map = serde_json::from_reader(reader)?;
@@ -153,7 +166,6 @@ fn is_correct_password(to_check: &Vec<u8>, password: &Vec<u8>) -> bool {
     is_same
 }
 
-// TODO: Logging in this function, return name of user inside Result, bruteforce protection : quentin
 fn welcome() -> Result<String, KingError> {
     let mut incremental_timer = 1;
     while true {
@@ -247,7 +259,7 @@ fn student_action(user: &str) {
         println!("*****\n1: See your grades\n2: About\n0: Quit");
         let choice = input().inside(0..=2).msg("Enter Your choice: ").get();
         match choice {
-            1 => show_grades("Enter your name. Do NOT lie!"),
+            1 => show_grades("Enter your name. Do NOT lie!",user),
             2 => about(),
             0 => quit(),
             _ => {
@@ -268,8 +280,8 @@ fn teacher_action(user: &str) {
         println!("*****\n1: See grades of student\n2: Enter grades\n3 About\n0: Quit");
         let choice = input().inside(0..=3).msg("Enter Your choice: ").get();
         match choice {
-            1 => show_grades("Enter the name of the user of which you want to see the grades:"),
-            2 => enter_grade(),
+            1 => show_grades("Enter the name of the user of which you want to see the grades:",user),
+            2 => enter_grade(user),
             3 => about(),
             0 => quit(),
             _ => {
@@ -285,24 +297,33 @@ fn teacher_action(user: &str) {
     }
 }
 
-// TODO: take message and username as parameter check with cabin if access to grades authorized + logs : quentin
-fn show_grades(message: &str) {
+//#todo is teacher ? gaetan : quentin
+fn show_grades(message: &str,user:&str) {
     println!("{}", message);
     let name: String = input().get();
-    println!("Here are the grades of user {}", name);
+    if user==name.as_str(){
+        println!("Here are the grades of user {}", name);
+        info!("User {} read grade of {}",
+              user,name
+        );
+    }else {
+        warn!(" User {} tried to read grade of {}, not authorized",
+              user,name
+        );
+    }
     //other file
-    //let db = DATABASE.lock().unwrap();
+    let db = DATABASE_GRADE.lock().unwrap();
 
-    // match db.get(&name) {
-    //     Some(grades) => {
-    //         println!("{:?}", grades);
-    //         println!(
-    //             "The average is {}",
-    //             (grades.iter().sum::<f32>()) / ((*grades).len() as f32)
-    //         );
-    //     }
-    //     None => println!("User not in system"),
-    // };
+    match db.get(&name) {
+        Some(grades) => {
+            println!("{:?}", grades);
+            println!(
+                "The average is {}",
+                (grades.iter().sum::<f32>()) / ((*grades).len() as f32)
+            );
+        }
+        None => println!("User not in system"),
+    };
 }
 
 // TODO: function called by admin_action => change access rights of username with casbin : gaetan
@@ -318,24 +339,33 @@ fn show_grades(message: &str) {
 // }
 
 // TODO: if students not exist error : quentin
-fn enter_grade() {
+fn enter_grade(user:&str) {
     println!("What is the name of the student?");
     let name: String = input().get();
+
     println!("What is the new grade of the student?");
     let grade: f32 = input().add_test(|x| *x >= 0.0 && *x <= 6.0).get();
     // change file with validation
-    // let mut map = DATABASE.lock().unwrap();
-    // match map.get_mut(&name) {
-    //     Some(v) => v.push(grade),
-    //     None => {
-    //         map.insert(name, vec![grade]);
-    //     }
-    // };
+    let mut map = DATABASE.lock().unwrap();
+    match map.get_mut(&name) {
+        Some(_) =>{
+            let mut map_grade = DATABASE_GRADE.lock().unwrap();
+            match map_grade.get_mut(&name) {
+                Some(v) => v.push(grade),
+                None => {
+                    map_grade.insert(name.clone(), vec![grade]);
+                }
+            }
+            info!("{} add grade : {} to student {}",user,grade,name.as_str());
+        },
+        None => {
+            warn!("user {} tried to add grade {} to unknown student {}",user,grade,name.as_str());
+        }
+    };
 }
 
 fn about() {
     error!("The requested URL was not found on this server.");
-    panic!("The requested URL was not found on this server.");
 }
 
 fn quit() {
@@ -343,6 +373,9 @@ fn quit() {
     let file = File::create(DATABASE_FILE).unwrap();
     let writer = BufWriter::new(file);
     serde_json::to_writer(writer, DATABASE.lock().unwrap().deref()).unwrap();
+    let file = File::create(GRADE_FILE).unwrap();
+    let writer = BufWriter::new(file);
+    serde_json::to_writer(writer, DATABASE_GRADE.lock().unwrap().deref()).unwrap();
     std::process::exit(0);
 }
 fn hash_password(password: &str, salt: [u8; 16], time: u32) -> Vec<u8> {
