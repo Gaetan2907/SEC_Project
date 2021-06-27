@@ -18,3 +18,9 @@ The crate *passablewords* is used to check if the password has enough entropy
 #### Input validation
 The crate *regex* is used to check if the username has only lowercase characters
 
+#### Database
+
+The database is already field with the following account: admin, teacher, student, student2. 
+
+The password are similar than the username (for example password of admin account is admin). 
+
