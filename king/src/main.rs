@@ -3,12 +3,11 @@ mod access_control;
 extern crate argon2;
 extern crate csv;
 extern crate passablewords;
-use crate::access_control::{is_allowed, CONFIG, POLICY};
-use crate::Actions::StudentAction;
+use crate::access_control::POLICY;
 use argon2::{Config, ThreadMode, Variant, Version};
 use futures::executor::block_on;
 use lazy_static::{__Deref, lazy_static};
-use log::{error, info, trace, warn};
+use log::{error, info, warn};
 use passablewords::{check_password, PasswordError};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -58,12 +57,6 @@ pub enum KingError {
     AlreadyRegistered,
 }
 
-enum Actions {
-    AdminAction,
-    TeacherAction,
-    StudentAction,
-}
-
 fn read_database_from_file<P: AsRef<Path>>(
     path: P,
 ) -> Result<HashMap<String, (Vec<u8>, Vec<u8>)>, Box<dyn Error>> {
@@ -84,9 +77,9 @@ fn check_username(username: &str) -> bool {
     let re = Regex::new(r"^[\da-z]{1,20}$").unwrap();
     re.is_match(username)
 }
-fn check_pass(password: &String) -> bool {
+fn check_pass(password: &str) -> bool {
     let good;
-    match check_password(password.as_str()) {
+    match check_password(password) {
         Ok(..) => {
             good = true;
         }
@@ -105,30 +98,34 @@ fn check_pass(password: &String) -> bool {
     }
     good
 }
-//tmp function
-fn register(username: &str, salt: &Vec<u8>, password: &Vec<u8>) {
-    let password = password.clone();
-    let salt = salt.clone();
-    let mut map = DATABASE.lock().unwrap();
-    map.insert(String::from(username), (salt, password));
-}
 
 fn register_user(role: &str) {
     let username: String = input()
         .msg("Please input username: ")
         .add_test(|x: &String| check_username(x.as_str()))
         .get();
-    let password: String = input().msg("Please input password: ").get();
+
+    let password: String = input()
+        .msg("Please input password: ")
+        .add_test(|x: &String| check_pass(x.as_str()))
+        .get();
 
     if !already_registered(username.as_str()) {
         // write role access rights into csv policy file
-        let mut policy_file = OpenOptions::new()
+        let policy_file = OpenOptions::new()
             .write(true)
             .append(true)
             .open(POLICY)
             .unwrap();
         let mut wtr = csv::Writer::from_writer(policy_file);
-        wtr.write_record(&["g", username.as_str(), role]);
+        match wtr.write_record(&["g", username.as_str(), role]) {
+            Ok(_) => {
+                info!("Role {} granted to {}", role, username);
+            }
+            Err(_) => {
+                error!("Error while granting Role {} to {}", role, username);
+            }
+        }
 
         // save credentials in hashmap
         let mut salt = [0u8; 16];
@@ -167,8 +164,7 @@ fn is_correct_password(to_check: &Vec<u8>, password: &Vec<u8>) -> bool {
 }
 
 fn welcome() -> Result<String, KingError> {
-    let mut incremental_timer = 1;
-    while true {
+    loop {
         let username: String = input()
             .msg("Please input username: or break ")
             .add_test(|x: &String| check_username(x.as_str()))
@@ -184,28 +180,22 @@ fn welcome() -> Result<String, KingError> {
         match data {
             Some(v) => {
                 let salt = v.0.clone();
-                let hashed_password = hash_password(
-                    password.as_str(),
-                    <[u8; 16]>::try_from(salt).unwrap(),
-                    incremental_timer,
-                );
+                let hashed_password =
+                    hash_password(password.as_str(), <[u8; 16]>::try_from(salt).unwrap(), 1);
                 if is_correct_password(&hashed_password, &v.1) {
                     info!("User {} logs-in", username);
                     println!("login success");
                     return Ok(username);
                 } else {
                     warn!("Failed log-in attempt for {}", username);
-                    // incremental_timer *= 2;
                 }
             }
             None => {
                 drop(map);
                 warn!("Failed log-in attempt for {}", username);
-                // incremental_timer *= 2;
             }
         };
     }
-    Err(KingError::LoginFailed)
 }
 
 fn menu(user: &str) {
@@ -227,12 +217,13 @@ fn menu(user: &str) {
 fn admin_action(user: &str) {
     if block_on(access_control::is_allowed(user, ADMIN_ACTION)) {
         info!("User {} accessed ADMIN_ACTION", user);
-        println!("*****\n1: Add teacher\n2: Add student\n3: About\n0: Quit");
+        println!("*****\n1: Add admin\n2: Add teacher\n3: Add student\n4: About\n0: Quit");
         let choice = input().inside(0..=4).msg("Enter Your choice: ").get();
         match choice {
             1 => register_user(ADMIN),
-            2 => register_user(STUDENT),
-            3 => about(),
+            2 => register_user(TEACHER),
+            3 => register_user(STUDENT),
+            4 => about(),
             0 => quit(),
             _ => {
                 error!("User {} made an impossible action choice", user);
