@@ -12,7 +12,9 @@ The crate *simplelog* is used to handle the logs of the program. Each user actio
 
 #### Authentication
 
-
+The crate *argon2* is used to create a good cryptograpical material from a passable password. The *rand* crate is used to have a cryptographical random
+The crate *passablewords* is used to check if the password has enough entropy
 
 #### Input validation
+The crate *regex* is used to check if the username has only lowercase characters
 

@@ -288,7 +288,7 @@ fn teacher_action(user: &str) {
 //#todo is teacher ? gaetan : quentin
 fn show_grades(message: &str, user: &str) {
     println!("{}", message);
-    let name: String = input().get();
+    let name: String = input().add_test(|x: &String| check_username(x.as_str())).get();
     let mut authorized = false;
     // teacher can read all grades
     if block_on(access_control::is_allowed(user, TEACHER_ACTION)) {
@@ -322,7 +322,7 @@ fn show_grades(message: &str, user: &str) {
 
 fn enter_grade(user: &str) {
     println!("What is the name of the student?");
-    let name: String = input().get();
+    let name: String = input().add_test(|x: &String| check_username(x.as_str())).get();
 
     println!("What is the new grade of the student?");
     let grade: f32 = input().add_test(|x| *x >= 0.0 && *x <= 6.0).get();
